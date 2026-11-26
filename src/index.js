@@ -1,0 +1,148 @@
+import {
+  Client,
+  Events,
+  GatewayIntentBits,
+  SlashCommandBuilder,
+} from 'discord.js';
+import { Kazagumo } from 'kazagumo';
+import { Connectors } from 'shoukaku';
+
+const required = ['DISCORD_TOKEN', 'LAVALINK_HOST', 'LAVALINK_PORT', 'LAVALINK_PASSWORD'];
+const missing = required.filter((key) => !process.env[key]);
+if (missing.length) throw new Error(`Missing environment: ${missing.join(', ')}`);
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+});
+
+const music = new Kazagumo({
+  defaultSearchEngine: 'youtube',
+  send: (guildId, payload) => client.guilds.cache.get(guildId)?.shard.send(payload),
+}, new Connectors.DiscordJS(client), [{
+  name: 'scopha',
+  url: `${process.env.LAVALINK_HOST}:${process.env.LAVALINK_PORT}`,
+  auth: process.env.LAVALINK_PASSWORD,
+  secure: process.env.LAVALINK_SECURE === '1',
+}], {
+  resume: true,
+  reconnectTries: 8,
+  reconnectInterval: 5,
+});
+
+const commands = [
+  new SlashCommandBuilder().setName('play').setDescription('Play or queue a track').addStringOption((option) => option.setName('query').setDescription('Song name or URL').setRequired(true)),
+  new SlashCommandBuilder().setName('pause').setDescription('Pause playback'),
+  new SlashCommandBuilder().setName('resume').setDescription('Resume playback'),
+  new SlashCommandBuilder().setName('skip').setDescription('Skip the current track'),
+  new SlashCommandBuilder().setName('stop').setDescription('Stop playback and leave'),
+  new SlashCommandBuilder().setName('queue').setDescription('Show the queue'),
+  new SlashCommandBuilder().setName('volume').setDescription('Set playback volume').addIntegerOption((option) => option.setName('level').setDescription('Volume from 1 to 150').setMinValue(1).setMaxValue(150).setRequired(true)),
+].map((command) => command.toJSON());
+
+async function voiceChannelFor(interaction) {
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  return member.voice.channel;
+}
+
+function currentPlayer(interaction) {
+  return music.players.get(interaction.guildId);
+}
+
+async function requirePlayer(interaction) {
+  const player = currentPlayer(interaction);
+  if (!player) await interaction.editReply('Nothing is playing.');
+  return player;
+}
+
+client.once(Events.ClientReady, async (readyClient) => {
+  await readyClient.application.commands.set(commands);
+  console.log(`Ready as ${readyClient.user.tag}`);
+});
+
+music.shoukaku.on('ready', (name) => console.log(`Lavalink ${name} connected`));
+music.shoukaku.on('error', (name, error) => console.error(`Lavalink ${name}:`, error));
+
+music.on('playerStart', async (player, track) => {
+  const channel = await client.channels.fetch(player.textId).catch(() => null);
+  if (channel?.isTextBased()) await channel.send(`Now playing **${track.title}**`);
+});
+
+music.on('playerEmpty', async (player) => {
+  const channel = await client.channels.fetch(player.textId).catch(() => null);
+  if (channel?.isTextBased()) await channel.send('Queue finished.');
+  player.destroy();
+});
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand() || !interaction.inCachedGuild()) return;
+  await interaction.deferReply();
+
+  try {
+    if (interaction.commandName === 'play') {
+      const voice = await voiceChannelFor(interaction);
+      if (!voice) return interaction.editReply('Join a voice channel first.');
+      let player = currentPlayer(interaction);
+      if (player && player.voiceId !== voice.id) return interaction.editReply('Join my voice channel first.');
+      if (!player) {
+        player = await music.createPlayer({
+          guildId: interaction.guildId,
+          textId: interaction.channelId,
+          voiceId: voice.id,
+          volume: 60,
+        });
+      }
+      const result = await music.search(interaction.options.getString('query', true), { requester: interaction.user });
+      if (!result.tracks.length) return interaction.editReply('No tracks found.');
+      if (result.type === 'PLAYLIST') player.queue.add(result.tracks);
+      else player.queue.add(result.tracks[0]);
+      if (!player.playing && !player.paused) await player.play();
+      return interaction.editReply(result.type === 'PLAYLIST' ? `Queued ${result.tracks.length} tracks.` : `Queued **${result.tracks[0].title}**.`);
+    }
+
+    const player = await requirePlayer(interaction);
+    if (!player) return;
+    const voice = await voiceChannelFor(interaction);
+    if (!voice || voice.id !== player.voiceId) return interaction.editReply('Join my voice channel first.');
+
+    if (interaction.commandName === 'pause') {
+      await player.pause(true);
+      return interaction.editReply('Paused.');
+    }
+    if (interaction.commandName === 'resume') {
+      await player.pause(false);
+      return interaction.editReply('Resumed.');
+    }
+    if (interaction.commandName === 'skip') {
+      await player.skip();
+      return interaction.editReply('Skipped.');
+    }
+    if (interaction.commandName === 'stop') {
+      player.destroy();
+      return interaction.editReply('Stopped.');
+    }
+    if (interaction.commandName === 'volume') {
+      const level = interaction.options.getInteger('level', true);
+      await player.setVolume(level);
+      return interaction.editReply(`Volume set to ${level}%.`);
+    }
+    if (interaction.commandName === 'queue') {
+      const tracks = [...player.queue].slice(0, 10);
+      const lines = tracks.map((track, index) => `${index + 1}. ${track.title}`);
+      return interaction.editReply(lines.length ? lines.join('\n') : 'The queue is empty.');
+    }
+  } catch (error) {
+    console.error(error);
+    return interaction.editReply('The command failed. Check the bot logs.');
+  }
+});
+
+async function shutdown() {
+  for (const player of music.players.values()) player.destroy();
+  client.destroy();
+  process.exit(0);
+}
+
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
+
+await client.login(process.env.DISCORD_TOKEN);

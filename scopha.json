@@ -1,0 +1,9 @@
+{
+  "runtime": "node",
+  "requiredEnvironment": [
+    "DISCORD_TOKEN"
+  ],
+  "services": [
+    "lavalink"
+  ]
+}
