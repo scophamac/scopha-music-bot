@@ -1,7 +1,9 @@
 import {
+  ApplicationIntegrationType,
   Client,
   Events,
   GatewayIntentBits,
+  InteractionContextType,
   SlashCommandBuilder,
 } from 'discord.js';
 import { Kazagumo } from 'kazagumo';
@@ -37,7 +39,10 @@ const commands = [
   new SlashCommandBuilder().setName('stop').setDescription('Stop playback and leave'),
   new SlashCommandBuilder().setName('queue').setDescription('Show the queue'),
   new SlashCommandBuilder().setName('volume').setDescription('Set playback volume').addIntegerOption((option) => option.setName('level').setDescription('Volume from 1 to 150').setMinValue(1).setMaxValue(150).setRequired(true)),
-].map((command) => command.toJSON());
+].map((command) => command
+  .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
+  .setContexts(InteractionContextType.Guild)
+  .toJSON());
 
 async function voiceChannelFor(interaction) {
   const guild = interaction.guild ?? await client.guilds.fetch(interaction.guildId);
@@ -56,8 +61,12 @@ async function requirePlayer(interaction) {
 }
 
 client.once(Events.ClientReady, async (readyClient) => {
-  await readyClient.application.commands.set(commands);
-  console.log(`Ready as ${readyClient.user.tag}`);
+  try {
+    const registered = await readyClient.application.commands.set(commands);
+    console.log(`Ready as ${readyClient.user.tag}; registered ${registered.size} guild-only commands`);
+  } catch (error) {
+    console.error('Command registration failed:', error);
+  }
 });
 
 music.shoukaku.on('ready', (name) => console.log(`Lavalink ${name} connected`));
