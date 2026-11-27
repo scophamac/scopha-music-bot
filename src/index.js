@@ -39,7 +39,22 @@ const commands = [
   new SlashCommandBuilder().setName('volume').setDescription('Set playback volume').addIntegerOption((option) => option.setName('level').setDescription('Volume from 1 to 150').setMinValue(1).setMaxValue(150).setRequired(true)),
 ].map((command) => command.toJSON());
 
-async function registerGuildCommands(guild) {
+function commandsAreCurrent(existing) {
+  if (existing.size !== commands.length) return false;
+
+  return commands.every((command) => {
+    const current = existing.find((item) => item.name === command.name && item.type === (command.type ?? 1));
+    return current?.equals(command, true) ?? false;
+  });
+}
+
+async function syncGuildCommands(guild) {
+  const existing = await guild.commands.fetch();
+  if (commandsAreCurrent(existing)) {
+    console.log(`Commands already current in ${guild.name}`);
+    return existing.size;
+  }
+
   const registered = await guild.commands.set(commands);
   console.log(`Registered ${registered.size} commands in ${guild.name}`);
   return registered.size;
@@ -65,9 +80,13 @@ client.once(Events.ClientReady, async (readyClient) => {
   try {
     let registered = 0;
     for (const guild of readyClient.guilds.cache.values()) {
-      registered += await registerGuildCommands(guild);
+      registered += await syncGuildCommands(guild);
     }
-    await readyClient.application.commands.set([]);
+    const globalCommands = await readyClient.application.commands.fetch();
+    if (globalCommands.size) {
+      await readyClient.application.commands.set([]);
+      console.log(`Removed ${globalCommands.size} legacy global commands`);
+    }
     console.log(`Ready as ${readyClient.user.tag}; registered ${registered} server commands`);
   } catch (error) {
     console.error('Command registration failed:', error);
@@ -75,7 +94,7 @@ client.once(Events.ClientReady, async (readyClient) => {
 });
 
 client.on(Events.GuildCreate, (guild) => {
-  registerGuildCommands(guild).catch((error) => console.error(`Command registration failed in ${guild.id}:`, error));
+  syncGuildCommands(guild).catch((error) => console.error(`Command registration failed in ${guild.id}:`, error));
 });
 
 music.shoukaku.on('ready', (name) => console.log(`Lavalink ${name} connected`));
