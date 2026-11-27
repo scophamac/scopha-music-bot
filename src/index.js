@@ -15,6 +15,8 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
 
+const playbackFailures = new Set();
+
 const music = new Kazagumo({
   defaultSearchEngine: 'youtube',
   send: (guildId, payload) => client.guilds.cache.get(guildId)?.shard.send(payload),
@@ -130,13 +132,22 @@ music.shoukaku.on('ready', (name) => console.log(`Lavalink ${name} connected`));
 music.shoukaku.on('error', (name, error) => console.error(`Lavalink ${name}:`, error));
 
 music.on('playerStart', async (player, track) => {
+  playbackFailures.delete(player.guildId);
   const channel = await client.channels.fetch(player.textId).catch(() => null);
   if (channel?.isTextBased()) await channel.send(`Now playing **${track.title}**`);
 });
 
+music.on('playerException', async (player, event) => {
+  playbackFailures.add(player.guildId);
+  console.error(`Playback failed in guild ${player.guildId}:`, event.exception?.message ?? 'Unknown Lavalink error');
+  const channel = await client.channels.fetch(player.textId).catch(() => null);
+  if (channel?.isTextBased()) await channel.send('Playback failed. Please try another track.');
+});
+
 music.on('playerEmpty', async (player) => {
   const channel = await client.channels.fetch(player.textId).catch(() => null);
-  if (channel?.isTextBased()) await channel.send('Queue finished.');
+  const failed = playbackFailures.delete(player.guildId);
+  if (!failed && channel?.isTextBased()) await channel.send('Queue finished.');
   player.destroy();
 });
 
@@ -163,7 +174,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           guildId: interaction.guildId,
           textId: interaction.channelId,
           voiceId: voice.id,
-          volume: 60,
+          volume: 100,
         });
       }
       const query = interaction.options.getString('query', true).trim();
