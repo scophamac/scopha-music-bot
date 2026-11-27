@@ -1,9 +1,7 @@
 import {
-  ApplicationIntegrationType,
   Client,
   Events,
   GatewayIntentBits,
-  InteractionContextType,
   SlashCommandBuilder,
 } from 'discord.js';
 import { Kazagumo } from 'kazagumo';
@@ -39,10 +37,13 @@ const commands = [
   new SlashCommandBuilder().setName('stop').setDescription('Stop playback and leave'),
   new SlashCommandBuilder().setName('queue').setDescription('Show the queue'),
   new SlashCommandBuilder().setName('volume').setDescription('Set playback volume').addIntegerOption((option) => option.setName('level').setDescription('Volume from 1 to 150').setMinValue(1).setMaxValue(150).setRequired(true)),
-].map((command) => command
-  .setIntegrationTypes(ApplicationIntegrationType.GuildInstall)
-  .setContexts(InteractionContextType.Guild)
-  .toJSON());
+].map((command) => command.toJSON());
+
+async function registerGuildCommands(guild) {
+  const registered = await guild.commands.set(commands);
+  console.log(`Registered ${registered.size} commands in ${guild.name}`);
+  return registered.size;
+}
 
 async function voiceChannelFor(interaction) {
   const guild = interaction.guild ?? await client.guilds.fetch(interaction.guildId);
@@ -62,11 +63,19 @@ async function requirePlayer(interaction) {
 
 client.once(Events.ClientReady, async (readyClient) => {
   try {
-    const registered = await readyClient.application.commands.set(commands);
-    console.log(`Ready as ${readyClient.user.tag}; registered ${registered.size} guild-only commands`);
+    let registered = 0;
+    for (const guild of readyClient.guilds.cache.values()) {
+      registered += await registerGuildCommands(guild);
+    }
+    await readyClient.application.commands.set([]);
+    console.log(`Ready as ${readyClient.user.tag}; registered ${registered} server commands`);
   } catch (error) {
     console.error('Command registration failed:', error);
   }
+});
+
+client.on(Events.GuildCreate, (guild) => {
+  registerGuildCommands(guild).catch((error) => console.error(`Command registration failed in ${guild.id}:`, error));
 });
 
 music.shoukaku.on('ready', (name) => console.log(`Lavalink ${name} connected`));
