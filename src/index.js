@@ -39,12 +39,41 @@ const commands = [
   new SlashCommandBuilder().setName('volume').setDescription('Set playback volume').addIntegerOption((option) => option.setName('level').setDescription('Volume from 1 to 150').setMinValue(1).setMaxValue(150).setRequired(true)),
 ].map((command) => command.toJSON());
 
+function optionShape(option) {
+  return {
+    type: option.type,
+    name: option.name,
+    description: option.description,
+    required: option.required ?? false,
+    autocomplete: option.autocomplete ?? false,
+    minValue: option.minValue ?? option.min_value ?? null,
+    maxValue: option.maxValue ?? option.max_value ?? null,
+    minLength: option.minLength ?? option.min_length ?? null,
+    maxLength: option.maxLength ?? option.max_length ?? null,
+    choices: (option.choices ?? []).map((choice) => ({ name: choice.name, value: choice.value })),
+    options: (option.options ?? []).map(optionShape),
+  };
+}
+
+function commandShape(command) {
+  return {
+    type: command.type ?? 1,
+    name: command.name,
+    description: command.description,
+    nsfw: command.nsfw ?? false,
+    defaultMemberPermissions: command.defaultMemberPermissions?.bitfield?.toString()
+      ?? command.default_member_permissions
+      ?? null,
+    options: (command.options ?? []).map(optionShape),
+  };
+}
+
 function commandsAreCurrent(existing) {
   if (existing.size !== commands.length) return false;
 
   return commands.every((command) => {
     const current = existing.find((item) => item.name === command.name && item.type === (command.type ?? 1));
-    return current?.equals(command, true) ?? false;
+    return current ? JSON.stringify(commandShape(current)) === JSON.stringify(commandShape(command)) : false;
   });
 }
 
