@@ -1,6 +1,6 @@
 {
   "name": "scopha-music-bot",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "description": "A small Discord music bot for Scopha and Lavalink",

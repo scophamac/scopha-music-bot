@@ -32,7 +32,7 @@ const music = new Kazagumo({
 });
 
 const commands = [
-  new SlashCommandBuilder().setName('play').setDescription('Play or queue a track').addStringOption((option) => option.setName('query').setDescription('Song name or URL').setRequired(true)),
+  new SlashCommandBuilder().setName('play').setDescription('Play or queue music from YouTube').addStringOption((option) => option.setName('query').setDescription('YouTube URL or song name').setRequired(true)),
   new SlashCommandBuilder().setName('pause').setDescription('Pause playback'),
   new SlashCommandBuilder().setName('resume').setDescription('Resume playback'),
   new SlashCommandBuilder().setName('skip').setDescription('Skip the current track'),
@@ -109,8 +109,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           volume: 60,
         });
       }
-      const result = await music.search(interaction.options.getString('query', true), { requester: interaction.user });
-      if (!result.tracks.length) return interaction.editReply('No tracks found.');
+      const query = interaction.options.getString('query', true).trim();
+      const result = await music.search(query, { requester: interaction.user, engine: 'youtube' });
+      if (!result.tracks.length) return interaction.editReply('No YouTube results found.');
       if (result.type === 'PLAYLIST') player.queue.add(result.tracks);
       else player.queue.add(result.tracks[0]);
       if (!player.playing && !player.paused) await player.play();
