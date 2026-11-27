@@ -40,7 +40,8 @@ const commands = [
 ].map((command) => command.toJSON());
 
 async function voiceChannelFor(interaction) {
-  const member = await interaction.guild.members.fetch(interaction.user.id);
+  const guild = interaction.guild ?? await client.guilds.fetch(interaction.guildId);
+  const member = await guild.members.fetch(interaction.user.id);
   return member.voice.channel;
 }
 
@@ -74,10 +75,18 @@ music.on('playerEmpty', async (player) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand() || !interaction.inCachedGuild()) return;
-  await interaction.deferReply();
+  if (!interaction.isChatInputCommand()) return;
+  if (!interaction.guildId) {
+    await interaction.reply({ content: 'Music commands are available in servers only.', ephemeral: true }).catch(console.error);
+    return;
+  }
 
   try {
+    // Acknowledge first. Discord invalidates an unanswered interaction after
+    // three seconds, while member fetches and music searches can take longer.
+    await interaction.deferReply();
+    console.log(`Command /${interaction.commandName} received in guild ${interaction.guildId}`);
+
     if (interaction.commandName === 'play') {
       const voice = await voiceChannelFor(interaction);
       if (!voice) return interaction.editReply('Join a voice channel first.');
@@ -131,8 +140,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.editReply(lines.length ? lines.join('\n') : 'The queue is empty.');
     }
   } catch (error) {
-    console.error(error);
-    return interaction.editReply('The command failed. Check the bot logs.');
+    console.error(`Command /${interaction.commandName} failed:`, error);
+    const message = 'The command failed. Check the bot logs.';
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(message).catch(console.error);
+    } else {
+      await interaction.reply({ content: message, ephemeral: true }).catch(console.error);
+    }
   }
 });
 
